@@ -1,0 +1,5 @@
+C:\Users\dngo\source\repos\PhongSuHuynhProject1\PhongSuHuynhProject1\bin\Debug\PhongSuHuynhProject1.dll
+C:\Users\dngo\source\repos\PhongSuHuynhProject1\PhongSuHuynhProject1\bin\Debug\PhongSuHuynhProject1.pdb
+C:\Users\dngo\source\repos\PhongSuHuynhProject1\PhongSuHuynhProject1\obj\Debug\PhongSuHuynhProject1.csproj.CoreCompileInputs.cache
+C:\Users\dngo\source\repos\PhongSuHuynhProject1\PhongSuHuynhProject1\obj\Debug\PhongSuHuynhProject1.dll
+C:\Users\dngo\source\repos\PhongSuHuynhProject1\PhongSuHuynhProject1\obj\Debug\PhongSuHuynhProject1.pdb
