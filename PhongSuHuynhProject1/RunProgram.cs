@@ -15,8 +15,8 @@ namespace PhongSuHuynhProject1
 
     class RecJig : DrawJig
     {
-        Point3d firstPoint;
-        Point3d secondPoint;
+        public Point3d firstPoint;
+        public Point3d secondPoint;
         public List<Point3d> primaryBoundary = new List<Point3d>();
         //THIS IS HOW YOU MAKE IT DONE
 

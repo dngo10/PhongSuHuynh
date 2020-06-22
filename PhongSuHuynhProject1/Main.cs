@@ -44,7 +44,7 @@ namespace PhongSuHuynhProject1
                     {
                         using (Transaction tr = db.TransactionManager.StartTransaction())
                         {
-                            List<BlockReference> blocks = RunCode(rec.primaryBoundary, tr, ref db, ed);
+                            List<BlockReference> blocks = RunCode(rec.firstPoint, rec.secondPoint, rec.primaryBoundary , tr, ref db, ed);
 
                             var ppr2 = ed.GetPoint("\nSpecify base point: ");
                             if (ppr2.Status == PromptStatus.OK)
@@ -59,6 +59,13 @@ namespace PhongSuHuynhProject1
                                     }
                                 }
                             }
+                            else
+                            {
+                                foreach (BlockReference block in blocks)
+                                {
+                                    block.Erase();
+                                }
+                            }
                             tr.Commit();
                         }
                         
@@ -67,7 +74,7 @@ namespace PhongSuHuynhProject1
             }
         }
 
-        public List<BlockReference> RunCode(List<Point3d> boundary, Transaction tr, ref Database db, Editor ed)
+        public List<BlockReference> RunCode(Point3d firstPoint, Point3d secondPoint, List<Point3d> boundary, Transaction tr, ref Database db, Editor ed)
         {
             //Setup layer and blockTableRecord
             createLayer();
@@ -79,26 +86,41 @@ namespace PhongSuHuynhProject1
 
             filterList[0] = new TypedValue(0, "INSERT");
             SelectionFilter filter = new SelectionFilter(filterList);
+
             Point3dCollection pntCol = new Point3dCollection();
             Point3dCollection pntColReversed = new Point3dCollection();
+
             foreach (Point3d point in boundary) pntCol.Add(point);
             for(int i = boundary.Count - 1; i >= 0; i--) pntColReversed.Add(boundary[i]);
 
             //PromptSelectionOptions opts = new PromptSelectionOptions();
             //opts.MessageForAdding = "Select entities: ";
 
-            PromptSelectionResult selRes = ed.SelectWindowPolygon(pntCol, filter);
+            HashSet<ObjectId> choosenIds = new HashSet<ObjectId>();
 
-            if (selRes.Status != PromptStatus.OK)
+            PromptSelectionResult selRes = ed.SelectCrossingWindow(firstPoint, secondPoint, filter);
+
+            if (selRes.Status == PromptStatus.OK)
             {
-                selRes = ed.SelectCrossingPolygon(pntColReversed, filter);
-                if (selRes.Status != PromptStatus.OK)
+                foreach (ObjectId id in selRes.Value.GetObjectIds())
                 {
-                    return InBoundaryAddBrefs;
+                    choosenIds.Add(id);
                 }
             }
 
-             foreach (ObjectId objectId in selRes.Value.GetObjectIds())
+            PromptSelectionResult selResReversed = ed.SelectCrossingWindow(secondPoint, firstPoint, filter);
+
+            if (selResReversed.Status == PromptStatus.OK)
+            {
+                foreach (ObjectId id in selResReversed.Value.GetObjectIds())
+                {
+                    choosenIds.Add(id);
+                }
+            }
+
+            if (choosenIds.Count == 0) return InBoundaryAddBrefs;
+
+            foreach (ObjectId objectId in choosenIds)
              {
                  BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
                  BlockTableRecord spaceRecord = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
@@ -131,7 +153,11 @@ namespace PhongSuHuynhProject1
                  if(canAdd(false, boundary, bref.Position))
                  {
                      InBoundaryAddBrefs.Add(bref);
-                 }
+                }
+                else
+                {
+                    bref.Erase();
+                }
              }
 
             return InBoundaryAddBrefs;
