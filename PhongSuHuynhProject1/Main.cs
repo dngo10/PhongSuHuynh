@@ -19,43 +19,111 @@ namespace PhongSuHuynhProject1
     {
         const string filterDictName = "ACAD_FILTER";
         const string spatialName = "SPATIAL";
+        const string swallLayer = "FRAME_SWALL";
+
         const string gePost = "GE_POST";
-        const string geDBLSTUB = "GE_DBLSTUD";
+        const string geDBLSTUD = "GE_DBLSTUD";
+        const string geTRISTUD = "GE_TRISTUD";
+
         const string frameText = "FRAME_TEXT";
 
         const string linkDwg = "K:\\DANIELSOFT\\PhongBlock_1.dwg";
 
+        private List<Point3d> m_pts = new List<Point3d>();
+
+        void ed_PointMonitor(object sender, PointMonitorEventArgs e)
+        {
+            Point3d ptLast = e.Context.LastPoint;
+            if(ptLast != Point3d.Origin && m_pts.Contains(e.Context.LastPoint) == false)
+            {
+                m_pts.Add(ptLast);
+            }
+        }
+
+        bool getSelectedWindow(ref List<Point3d> boundary, ref Editor ed, ref Database db)
+        {
+            
+            PromptSelectionOptions pso = new PromptSelectionOptions();
+            pso.MessageForAdding = "Select Objects: ";
+            pso.SingleOnly = false;
+            PromptSelectionResult psr = ed.GetSelection(pso);
+            if (psr.Status != PromptStatus.OK) return false;
+            SelectionSetDelayMarshalled ssMarshal = (SelectionSetDelayMarshalled)psr.Value;
+            AdsName name = ssMarshal.Name;
+            SelectionSet selSet = (SelectionSet)ssMarshal;
+            foreach (SelectedObject item in selSet)
+            {
+                boundary.Clear();
+                switch (item.SelectionMethod)
+                {
+                    case SelectionMethod.Crossing:
+                        CrossingOrWindowSelectedObject crossSelObj = item as CrossingOrWindowSelectedObject;
+                        PickPointDescriptor[] crossSelPickedPoints = crossSelObj.GetPickPoints();
+                        foreach (PickPointDescriptor point in crossSelPickedPoints) boundary.Add(point.PointOnLine);
+                        break;
+                    case SelectionMethod.Window:
+                        CrossingOrWindowSelectedObject windSelObj = item as CrossingOrWindowSelectedObject;
+                        PickPointDescriptor[] winSelPickedPoints = windSelObj.GetPickPoints();
+                        foreach (PickPointDescriptor point in winSelPickedPoints) boundary.Add(point.PointOnLine);
+                        break;
+                }
+            }
+            return true;
+        }
+
+
         [CommandMethod("PhongSuHuynh")]
         public void BoxJig()
         {
+            m_pts = new List<Point3d>();
             var doc = Application.DocumentManager.MdiActiveDocument;
             var db = doc.Database;
             var ed = doc.Editor;
 
-            var ppr = ed.GetPoint("\nSpecify first point: ");
+            //var ppr = ed.GetPoint("\nSpecify first point: ");
 
-            if (ppr.Status == PromptStatus.OK)
-            {
-                RecJig rec = new RecJig(ppr.Value);
-                PromptResult promptResult  = ed.Drag(rec);
-                if(promptResult.Status == PromptStatus.OK)
+            //if (ppr.Status == PromptStatus.OK)
+            if (true)
                 {
-                    using (doc.LockDocument())
+
+                if(!getSelectedWindow(ref m_pts, ref ed, ref db))
+                {
+                    return;
+                }
+
+                //RecJig rec = new RecJig(ppr.Value);
+                //PromptResult promptResult  = ed.Drag(rec);
+                //psr.Status == PromptStatus.OK)
+                
+                using (doc.LockDocument())
+                {
+                    using (Transaction tr = db.TransactionManager.StartTransaction())
                     {
-                        using (Transaction tr = db.TransactionManager.StartTransaction())
+                        List<BlockReference> blocks = new List<BlockReference>();
+                        List<Line> lines = new List<Line>();
+
+                        HashSet<String> NothingBlocks = new HashSet<string>();
+
+                        //RunCode(rec.firstPoint, rec.secondPoint, tr, ref db, ed, ref blocks, ref lines);
+                        RunCode(m_pts, tr, ref db, ed, ref blocks, ref lines, ref NothingBlocks);
+                        if (blocks.Count != 0 || lines.Count != 0)
                         {
-                            List<BlockReference> blocks = RunCode(rec.firstPoint, rec.secondPoint, rec.primaryBoundary , tr, ref db, ed);
 
                             var ppr2 = ed.GetPoint("\nSpecify base point: ");
                             if (ppr2.Status == PromptStatus.OK)
                             {
-                                DragEntities dragEntity = new DragEntities(blocks, ppr2.Value);
+                                DragEntities dragEntity = new DragEntities(blocks, lines, ppr2.Value);
                                 PromptResult result = ed.Drag(dragEntity);
-                                if(result.Status != PromptStatus.OK)
+                                if (result.Status != PromptStatus.OK)
                                 {
-                                    foreach(BlockReference block in blocks)
+                                    foreach (BlockReference block in blocks)
                                     {
                                         block.Erase();
+                                    }
+
+                                    foreach (Line line in lines)
+                                    {
+                                        line.Erase();
                                     }
                                 }
                             }
@@ -65,40 +133,37 @@ namespace PhongSuHuynhProject1
                                 {
                                     block.Erase();
                                 }
+
+                                foreach (Line line in lines)
+                                {
+                                    line.Erase();
+                                }
                             }
-                            tr.Commit();
                         }
+                        tr.Commit();
                         
                     }
                 }
             }
         }
 
-        public List<BlockReference> RunCode(Point3d firstPoint, Point3d secondPoint, List<Point3d> boundary, Transaction tr, ref Database db, Editor ed)
+        public void RunCode(List<Point3d> pts, Transaction tr, ref Database db, Editor ed, ref List<BlockReference> InBoundaryAddBrefs, ref List<Line> InBoundaryLines, ref HashSet<String> NothingBlocks)
         {
             //Setup layer and blockTableRecord
             createLayer();
             copyLocktableRecord();
             List<BlockReference> objects = new List<BlockReference>();
-            List<BlockReference> InBoundaryAddBrefs = new List<BlockReference>();
+
+            List<Line> sWallLines = new List<Line>();
 
             TypedValue[] filterList = new TypedValue[1];
 
-            filterList[0] = new TypedValue(0, "INSERT");
+            filterList[0] = new TypedValue(0, "INSERT,LINE");
             SelectionFilter filter = new SelectionFilter(filterList);
-
-            Point3dCollection pntCol = new Point3dCollection();
-            Point3dCollection pntColReversed = new Point3dCollection();
-
-            foreach (Point3d point in boundary) pntCol.Add(point);
-            for(int i = boundary.Count - 1; i >= 0; i--) pntColReversed.Add(boundary[i]);
-
-            //PromptSelectionOptions opts = new PromptSelectionOptions();
-            //opts.MessageForAdding = "Select entities: ";
 
             HashSet<ObjectId> choosenIds = new HashSet<ObjectId>();
 
-            PromptSelectionResult selRes = ed.SelectCrossingWindow(firstPoint, secondPoint, filter);
+            PromptSelectionResult selRes = ed.SelectCrossingWindow(pts[0], pts[2], filter);
 
             if (selRes.Status == PromptStatus.OK)
             {
@@ -108,7 +173,7 @@ namespace PhongSuHuynhProject1
                 }
             }
 
-            PromptSelectionResult selResReversed = ed.SelectCrossingWindow(secondPoint, firstPoint, filter);
+            PromptSelectionResult selResReversed = ed.SelectCrossingWindow(pts[2], pts[0], filter);
 
             if (selResReversed.Status == PromptStatus.OK)
             {
@@ -118,57 +183,97 @@ namespace PhongSuHuynhProject1
                 }
             }
 
-            if (choosenIds.Count == 0) return InBoundaryAddBrefs;
+            if (choosenIds.Count == 0) return;
+
+
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord spaceRecord = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
+            BlockTableRecord gePostBt = (BlockTableRecord)tr.GetObject(bt[gePost], OpenMode.ForRead);
+            BlockTableRecord geDBLSTUDPost = (BlockTableRecord)tr.GetObject(bt[geDBLSTUD], OpenMode.ForRead);
+            BlockTableRecord geTRISTUDPost = (BlockTableRecord)tr.GetObject(bt[geTRISTUD], OpenMode.ForRead);
 
             foreach (ObjectId objectId in choosenIds)
-             {
-                 BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-                 BlockTableRecord spaceRecord = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
-                 BlockReference bref = (BlockReference)tr.GetObject(objectId, OpenMode.ForRead);
+            {
+                 DBObject dbObject = tr.GetObject(objectId, OpenMode.ForRead);
 
-                 BlockTableRecord gePostBt = (BlockTableRecord)tr.GetObject(bt[gePost], OpenMode.ForRead);
-                 BlockTableRecord geDBLSTUBPost = (BlockTableRecord)tr.GetObject(bt[geDBLSTUB], OpenMode.ForRead);
 
-                 BlockTableRecord brefRecord = (BlockTableRecord)tr.GetObject(bref.BlockTableRecord, OpenMode.ForRead);
-
-                 string brefName = bref.IsDynamicBlock ? ((BlockTableRecord)bref.DynamicBlockTableRecord.GetObject(OpenMode.ForRead)).Name : bref.Name;
-                 if (brefName == gePost)
+                 if(objectId.ObjectClass == RXObject.GetClass(typeof(Line)))
                  {
-                     objects.Add(copyDynamicBlock(spaceRecord, ref bref, ref gePostBt, tr));
+                     Line line = dbObject as Line;
+                     if(line.Layer.Split('|').Last() == swallLayer)
+                     {
+                         sWallLines.Add(copyLine(spaceRecord, ref line, tr));
+                     }
                  }
-                 else if (brefName == geDBLSTUB)
+                 else if(dbObject is BlockReference)
                  {
-                     objects.Add(copyDynamicBlock(spaceRecord, ref bref, ref geDBLSTUBPost, tr));
+                    BlockReference bref =dbObject as BlockReference;
+                    BlockTableRecord brefRecord = (BlockTableRecord)tr.GetObject(bref.BlockTableRecord, OpenMode.ForRead);
 
+                    string brefName = bref.IsDynamicBlock ? ((BlockTableRecord)bref.DynamicBlockTableRecord.GetObject(OpenMode.ForRead)).Name : bref.Name;
+                    if (brefName == gePost)
+                    {
+                        objects.Add(copyDynamicBlock(spaceRecord, ref bref, ref gePostBt, tr));
+                    }
+                    else if (brefName == geDBLSTUD)
+                    {
+                        objects.Add(copyDynamicBlock(spaceRecord, ref bref, ref geDBLSTUDPost, tr));
+                    }
+                    else if (brefName == geTRISTUD)
+                    {
+                        objects.Add(copyDynamicBlock(spaceRecord, ref bref, ref geTRISTUDPost, tr));
+                    }
+                    else
+                    {
+                        List<BlockReference> rawNewBlocks = new List<BlockReference>();
+                        List<Line> newLines = new List<Line>();
+                        InspectBlockReference(ref bt, ref tr, ref spaceRecord, ref bref, ref rawNewBlocks, ref newLines , ref NothingBlocks);
+                        objects.AddRange(rawNewBlocks);
+                        sWallLines.AddRange(newLines);
+                    }
                  }
-                 else
-                 {
-                     objects.AddRange(InspectBlockReference(ref bt, ref tr, ref spaceRecord, ref bref));
-                 }
-             }
+            }
 
-             
-             foreach(BlockReference bref in objects)
-             {
-                 if(canAdd(false, boundary, bref.Position))
-                 {
-                     InBoundaryAddBrefs.Add(bref);
+
+            List<Point3d> boundary = createRectangleForXclip(pts);
+            foreach(BlockReference bref in objects)
+            {
+                if(canAdd(false, boundary, bref.Position))
+                {
+                    InBoundaryAddBrefs.Add(bref);
+               }
+               else
+               {
+                   bref.Erase();
+               }
+            }
+
+            foreach(Line line in sWallLines)
+            {
+                if(canAdd(false, boundary, line.StartPoint) || canAdd(false, boundary, line.EndPoint)) {
+                    InBoundaryLines.Add(line);
                 }
                 else
                 {
-                    bref.Erase();
+                    line.Erase();
                 }
-             }
+            }
 
-            return InBoundaryAddBrefs;
+            return;
         }
 
+        //public List<Line> InsectLine(ref Transaction tr, ref BlockTableRecord spaceRecord, ref Line line)
+        //{
+        //
+        //}
+
         //Carry all.
-        public List<BlockReference> InspectBlockReference(ref BlockTable bt, ref Transaction tr, ref BlockTableRecord spaceRecord, ref BlockReference bref)
+        public void InspectBlockReference(ref BlockTable bt, ref Transaction tr, ref BlockTableRecord spaceRecord, 
+            ref BlockReference bref, ref List<BlockReference> blocks, ref List<Line> lines, ref HashSet<String> NothingBlocks)
         {
-            Matrix3d brefMatrix = bref.BlockTransform;
             BlockTableRecord gePostBt = (BlockTableRecord)tr.GetObject(bt[gePost], OpenMode.ForRead);
-            BlockTableRecord geDBLSTUBPost = (BlockTableRecord)tr.GetObject(bt[geDBLSTUB], OpenMode.ForRead);
+            BlockTableRecord geDBLSTUBPost = (BlockTableRecord)tr.GetObject(bt[geDBLSTUD], OpenMode.ForRead);
+            BlockTableRecord geTRISTUDPost = (BlockTableRecord)tr.GetObject(bt[geTRISTUD], OpenMode.ForRead);
             List<Point2d> boundary = new List<Point2d>();
             bool isInverted = false;
             bool hasBoundary = false;
@@ -211,7 +316,7 @@ namespace PhongSuHuynhProject1
                 }
 
                 BlockTableRecord newBtr = (BlockTableRecord)tr.GetObject(bref.BlockTableRecord, OpenMode.ForRead);
-                List<BlockReference> rawResultBlock = new List<BlockReference>();
+
                 foreach (ObjectId id in newBtr)
                 {
                     if (id.ObjectClass.DxfName == "INSERT")
@@ -219,32 +324,35 @@ namespace PhongSuHuynhProject1
                         BlockReference newBref1 = (BlockReference)tr.GetObject(id, OpenMode.ForRead);
                         Matrix3d matrix3d = newBref1.BlockTransform;
                         string brefName = newBref1.IsDynamicBlock ? ((BlockTableRecord)newBref1.DynamicBlockTableRecord.GetObject(OpenMode.ForRead)).Name : newBref1.Name;
-                        if (brefName.Split('|').Last() == gePost)
+                        if (brefName.Split('|').Last() == gePost && !NothingBlocks.Contains(brefName))
                         {
                             BlockReference bref2 = copyDynamicBlock(spaceRecord, ref newBref1, ref gePostBt, tr);
-                            if(!hasBoundary)
+                            if(!hasBoundary || canAdd(isInverted, boundary, bref2.Position))
                             {
-                                rawResultBlock.Add(bref2);
-                            }
-                            else if(canAdd(isInverted, boundary, bref2.Position))
-                            {
-                                rawResultBlock.Add(bref2);
+                                blocks.Add(bref2);
                             }
                             else
                             {
                                 bref2.Erase();
                             }
                         }
-                        else if (brefName.Split('|').Last() == geDBLSTUB)
+                        else if (brefName.Split('|').Last() == geDBLSTUD && !NothingBlocks.Contains(brefName))
                         {
                             BlockReference bref2 = copyDynamicBlock(spaceRecord, ref newBref1, ref geDBLSTUBPost, tr);
-                            if (!hasBoundary)
+                            if (!hasBoundary || canAdd(isInverted, boundary, bref2.Position))
                             {
-                                rawResultBlock.Add(bref2);
+                                blocks.Add(bref2);
                             }
-                            else if (canAdd(isInverted, boundary, bref2.Position))
+                            else
                             {
-                                rawResultBlock.Add(bref2);
+                                bref2.Erase();
+                            }
+                        } else if(brefName.Split('|').Last() == geTRISTUD && !NothingBlocks.Contains(brefName))
+                        {
+                            BlockReference bref2 = copyDynamicBlock(spaceRecord, ref newBref1, ref geTRISTUDPost, tr);
+                            if (!hasBoundary || canAdd(isInverted, boundary, bref2.Position))
+                            {
+                                blocks.Add(bref2);
                             }
                             else
                             {
@@ -253,14 +361,22 @@ namespace PhongSuHuynhProject1
                         }
                         else
                         {
-                            List<BlockReference> newBrefs = InspectBlockReference(ref bt, ref tr, ref spaceRecord, ref newBref1);
+                            List<BlockReference> newObjects = new List<BlockReference>();
+                            List<Line> newLines = new List<Line>();
+
+                            InspectBlockReference(ref bt, ref tr, ref spaceRecord, ref newBref1, ref newObjects, ref newLines, ref NothingBlocks);
+
+                            if(newObjects.Count == 0 && newLines.Count == 0)
+                            {
+                                NothingBlocks.Add(brefName);
+                            }
                             if (hasBoundary)
                             {
-                                foreach(BlockReference nbref in newBrefs)
+                                foreach(BlockReference nbref in newObjects)
                                 {
                                     if(canAdd(isInverted, boundary, nbref.Position))
                                     {
-                                        rawResultBlock.Add(nbref);
+                                        blocks.Add(nbref);
                                     }
                                     else
                                     {
@@ -270,21 +386,33 @@ namespace PhongSuHuynhProject1
                             }
                             else
                             {
-                                rawResultBlock.AddRange(newBrefs);
+                                blocks.AddRange(newObjects);
+                            }
+                        }
+                    }
+                    else if (id.ObjectClass == RXObject.GetClass(typeof(Line)))
+                    {
+                        Line line = (Line)tr.GetObject(id, OpenMode.ForRead);
+                        if (line.Layer.Split('|').Last() == swallLayer)
+                        {
+                            Line newLine = copyLine(spaceRecord, ref line, tr);
+                            if (canAdd(isInverted, boundary, newLine.StartPoint) || canAdd(isInverted, boundary, newLine.EndPoint))
+                            {
+                                lines.Add(newLine);
                             }
                         }
                     }
                 }
 
-                for (int i = 0; i < rawResultBlock.Count; i++)
+                for (int i = 0; i < blocks.Count; i++)
                 {
-                    rawResultBlock[i].TransformBy(bref.BlockTransform);
+                    blocks[i].TransformBy(bref.BlockTransform);
                 }
-                return rawResultBlock;
-            }
-            else
-            {
-                return new List<BlockReference>();
+
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    lines[i].TransformBy(bref.BlockTransform);
+                }
             }
         }
 
@@ -328,7 +456,7 @@ namespace PhongSuHuynhProject1
 
         public List<Point3d> createRectangleForXclip(List<Point3d> boundary)
         {
-            if (boundary.Count != 2) return null;
+            if (boundary.Count != 2) return boundary;
 
             Point3d point2 = new Point3d(boundary[1].X, boundary[0].Y, 0);
             Point3d point4 = new Point3d(boundary[0].X, boundary[1].Y, 0);
@@ -355,7 +483,7 @@ namespace PhongSuHuynhProject1
 
         public List<Point2d> createRectangleForXclip(List<Point2d> boundary)
         {
-            if (boundary.Count != 2) return null;
+            if (boundary.Count != 2) return boundary;
 
             Point2d point2 = new Point2d(boundary[1].X, boundary[0].Y);
             Point2d point4 = new Point2d(boundary[0].X, boundary[1].Y);
@@ -385,9 +513,25 @@ namespace PhongSuHuynhProject1
             newbref.TransformBy(bref.BlockTransform);
             newbref.BlockUnit = bref.BlockUnit;
             newbref.Normal = bref.Normal;
-            newbref.Layer = bref.Layer;
+            newbref.Layer = bref.Layer.Split('|').Last();
 
             return newbref;
+        }
+
+
+        public Line copyLine(BlockTableRecord spaceRecord, ref Line line, Transaction tr)
+        {
+            Line newLine = new Line();
+            newLine.StartPoint = line.StartPoint;
+            newLine.EndPoint = line.EndPoint;
+            newLine.Normal = line.Normal;
+            newLine.Layer = swallLayer;
+            spaceRecord.UpgradeOpen();
+            spaceRecord.AppendEntity(newLine);
+            tr.AddNewlyCreatedDBObject(newLine, true);
+            spaceRecord.DowngradeOpen();
+
+            return newLine;
         }
 
         public BlockReference copyDynamicBlock(BlockTableRecord spaceRecord, ref BlockReference bref, ref BlockTableRecord br, Transaction tr)
@@ -398,6 +542,7 @@ namespace PhongSuHuynhProject1
             spaceRecord.UpgradeOpen();
             spaceRecord.AppendEntity(newbref);
             tr.AddNewlyCreatedDBObject(newbref, true);
+            spaceRecord.DowngradeOpen();
 
             //newbref.Visible = false;
 
@@ -429,14 +574,19 @@ namespace PhongSuHuynhProject1
                 {
                     BlockTable bt = (BlockTable)tr.GetObject(OpenDb.BlockTableId, OpenMode.ForRead);
 
-                    if (bt.Has(geDBLSTUB))
+                    if (bt.Has(geDBLSTUD))
                     {
-                        ids.Add(bt[geDBLSTUB]);
+                        ids.Add(bt[geDBLSTUD]);
                     }
 
                     if (bt.Has(gePost))
                     {
                         ids.Add(bt[gePost]);
+                    }
+
+                    if (bt.Has(geTRISTUD))
+                    {
+                        ids.Add(bt[geTRISTUD]);
                     }
 
                     tr.Commit();

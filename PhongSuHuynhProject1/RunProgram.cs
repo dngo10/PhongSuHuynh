@@ -97,21 +97,27 @@ namespace PhongSuHuynhProject1
     class DragEntities : DrawJig
     {
         List<BlockReference> brefs = new List<BlockReference>();
-        List<Point3d> positions = new List<Point3d>();
+        List<Line> lines = new List<Line>();
+
+        List<Point3d> blockPosition = new List<Point3d>();
+        List<Tuple<Point3d, Point3d>> linesPosition = new List<Tuple<Point3d, Point3d>>();
         List<Circle> circles = new List<Circle>();
         Point3d basePoint;
         Point3d secondPoint;
 
-        public DragEntities(List<BlockReference> brefs, Point3d basePoint)
+        public DragEntities(List<BlockReference> brefs, List<Line> lines, Point3d basePoint)
         {
             this.basePoint = basePoint;
             this.brefs = brefs;
+            this.lines = lines;
+
             foreach(BlockReference bref in brefs)
             {
-                Circle cir = new Circle(bref.Position, Vector3d.ZAxis, 2);
-                circles.Add(cir);
-
-                positions.Add(new Point3d(bref.Position.X, bref.Position.Y, 0));
+                blockPosition.Add(new Point3d(bref.Position.X, bref.Position.Y, 0));
+            }
+            foreach(Line line in lines)
+            {
+                linesPosition.Add(new Tuple<Point3d, Point3d>(line.StartPoint, line.EndPoint));
             }
         }
 
@@ -143,11 +149,21 @@ namespace PhongSuHuynhProject1
                 Vector3d vec = basePoint.GetVectorTo(secondPoint);
                 Matrix3d disp = Matrix3d.Displacement(this.basePoint.GetVectorTo(this.secondPoint));
                 //geo.PushModelTransform(disp);
-                for (int i = 0; i < positions.Count; i++)
+                for (int i = 0; i < blockPosition.Count; i++)
                 {
-                    Point3d tempPoint = positions[i] + vec;
+                    Point3d tempPoint = blockPosition[i] + vec;
                     brefs[i].Position = tempPoint;
                     geo.Draw(brefs[i]);
+                }
+
+                for(int i = 0; i < linesPosition.Count; i++)
+                {
+                    Point3d tempStartPoint = linesPosition[i].Item1 + vec;
+                    Point3d tempEndPoint = linesPosition[i].Item2 + vec;
+
+                    lines[i].StartPoint = tempStartPoint;
+                    lines[i].EndPoint = tempEndPoint;
+                    geo.Draw(lines[i]);
                 }
                 //geo.PopModelTransform();
                 return true;
